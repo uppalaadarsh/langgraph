@@ -1,0 +1,780 @@
+# Mini Project: AI IT Helpdesk Agent
+
+The user can ask things like:
+
+> “My VPN is not connecting.”  
+> “I forgot my password.”  
+> “My laptop is very slow.”  
+> “Create a support ticket for this issue.”
+
+The system will use:
+
+text
+LLM
++
+LangGraph State
++
+Routing
++
+Tools
++
+Agent-style decision making
+
+
+LangGraph is designed for exactly this kind of workflow: break the process into nodes, share state between them, and define how execution moves from one node to another. [Docs by LangChain](https://docs.langchain.com/oss/javascript/langgraph/thinking-in-langgraph?utm_source=chatgpt.com)
+
+---
+
+# 1. Architecture
+
+text
+                    USER
+                     │
+                     ▼
+              ┌──────────────┐
+              │ Input Query  │
+              └──────┬───────┘
+                     │
+                     ▼
+              ┌──────────────┐
+              │ LLM CLASSIFY │
+              │    ISSUE     │
+              └──────┬───────┘
+                     │
+          ┌──────────┼───────────┐
+          │          │           │
+          ▼          ▼           ▼
+      PASSWORD      VPN       GENERAL IT
+          │          │           │
+          ▼          ▼           ▼
+    Password Tool  VPN Tool   KB Search Tool
+          │          │           │
+          └──────────┼───────────┘
+                     │
+                     ▼
+              ┌──────────────┐
+              │ LLM RESPONSE │
+              └──────┬───────┘
+                     │
+                     ▼
+                   END
+
+
+Later we can add:
+
+text
+Issue unresolved?
+      │
+      ├── NO → END
+      │
+      └── YES
+            ↓
+       Create Ticket Tool
+            ↓
+           END
+
+
+That gives students a very clean progression.
+
+---
+
+# 2. What students learn
+
+This one project teaches:
+
+text
+State
+Nodes
+Edges
+Conditional Routing
+LLM Node
+Tools
+Tool Selection
+Agent-style Workflow
+Final Response
+
+
+That’s enough for a proper first LangGraph project.
+
+---
+
+# 3. Install libraries
+
+python
+%pip install -U langgraph langchain-openai python-dotenv
+
+
+---
+
+# 4. Imports
+
+python
+from typing_extensions import TypedDict
+
+from langgraph.graph import (
+    StateGraph,
+    START,
+    END
+)
+
+from langchain_openai import ChatOpenAI
+
+from dotenv import load_dotenv
+
+
+Then:
+
+python
+load_dotenv()
+
+
+---
+
+# 5. Create the LLM
+
+python
+model = ChatOpenAI(
+    model="gpt-5-mini",
+    temperature=0
+)
+
+
+For the class:
+
+text
+LLM
+=
+Reasoning / Classification / Response Generation
+
+
+---
+
+# 6. Define the State
+
+python
+class HelpdeskState(TypedDict):
+
+    user_query: str
+
+    issue_type: str
+
+    tool_result: str
+
+    final_response: str
+
+
+So the state carries:
+
+text
+User Query
+↓
+Issue Type
+↓
+Tool Result
+↓
+Final Answer
+
+
+---
+
+# 7. Create tools
+
+For the first project, keep tools as normal Python functions.
+
+## Password tool
+
+python
+def password_help():
+    return """
+Password Reset Instructions:
+
+1. Open the company login portal.
+2. Click 'Forgot Password'.
+3. Verify your registered email.
+4. Create a new password.
+5. Login again.
+
+If the reset fails, contact IT support.
+"""
+
+
+---
+
+## VPN tool
+
+python
+def vpn_help():
+    return """
+VPN Troubleshooting:
+
+1. Check internet connection.
+2. Restart the VPN application.
+3. Verify username and password.
+4. Disconnect and reconnect.
+5. Restart the computer.
+
+If the issue continues,
+a support ticket may be required.
+"""
+
+
+---
+
+## General IT tool
+
+python
+def general_it_help():
+    return """
+General IT Troubleshooting:
+
+1. Restart the application.
+2. Restart the computer.
+3. Check network connectivity.
+4. Check for software updates.
+5. Contact IT support if the issue persists.
+"""
+
+
+For now:
+
+> Tool = deterministic function that does a specific job.
+
+---
+
+# 8. Node 1 — LLM classifier
+
+This is the first AI node.
+
+python
+def classify_issue(
+    state: HelpdeskState
+):
+
+    query = state["user_query"]
+
+    prompt = f"""
+Classify this IT support request.
+
+Request:
+{query}
+
+Choose exactly one category:
+
+password
+vpn
+general
+
+Return only the category name.
+"""
+
+    response = model.invoke(prompt)
+
+    issue_type = response.content.strip().lower()
+
+    return {
+        "issue_type": issue_type
+    }
+
+
+Example:
+
+text
+"My VPN won't connect"
+
+        ↓
+
+LLM
+
+        ↓
+
+vpn
+
+
+---
+
+# 9. Create routing function
+
+Now we decide which tool node should run.
+
+python
+def route_issue(
+    state: HelpdeskState
+):
+
+    issue_type = state["issue_type"]
+
+    if issue_type == "password":
+        return "password"
+
+    elif issue_type == "vpn":
+        return "vpn"
+
+    else:
+        return "general"
+
+
+This function is our:
+
+text
+Conditional Router
+
+
+---
+
+# 10. Password Node
+
+python
+def password_node(
+    state: HelpdeskState
+):
+
+    result = password_help()
+
+    return {
+        "tool_result": result
+    }
+
+
+---
+
+# 11. VPN Node
+
+python
+def vpn_node(
+    state: HelpdeskState
+):
+
+    result = vpn_help()
+
+    return {
+        "tool_result": result
+    }
+
+
+---
+
+# 12. General IT Node
+
+python
+def general_node(
+    state: HelpdeskState
+):
+
+    result = general_it_help()
+
+    return {
+        "tool_result": result
+    }
+
+
+Now we have three specialized nodes.
+
+---
+
+# 13. Final LLM Response Node
+
+This is where the LLM converts the tool output into a natural response.
+
+python
+def generate_response(
+    state: HelpdeskState
+):
+
+    prompt = f"""
+You are an IT Helpdesk Assistant.
+
+User Issue:
+{state['user_query']}
+
+Troubleshooting Information:
+{state['tool_result']}
+
+Give a short, clear,
+professional answer to the user.
+
+Do not invent additional technical details.
+"""
+
+    response = model.invoke(prompt)
+
+    return {
+        "final_response":
+        response.content
+    }
+
+
+Architecture now:
+
+text
+User
+ ↓
+LLM Classification
+ ↓
+Tool
+ ↓
+LLM Final Response
+
+
+---
+
+# 14. Build the graph
+
+python
+builder = StateGraph(
+    HelpdeskState
+)
+
+
+---
+
+# 15. Add Nodes
+
+python
+builder.add_node(
+    "classify_issue",
+    classify_issue
+)
+
+builder.add_node(
+    "password_help",
+    password_node
+)
+
+builder.add_node(
+    "vpn_help",
+    vpn_node
+)
+
+builder.add_node(
+    "general_help",
+    general_node
+)
+
+builder.add_node(
+    "generate_response",
+    generate_response
+)
+
+
+---
+
+# 16. Start the graph
+
+python
+builder.add_edge(
+    START,
+    "classify_issue"
+)
+
+
+---
+
+# 17. Add conditional routing
+
+This is the important part.
+
+python
+builder.add_conditional_edges(
+    "classify_issue",
+    route_issue,
+    {
+        "password":
+            "password_help",
+
+        "vpn":
+            "vpn_help",
+
+        "general":
+            "general_help"
+    }
+)
+
+
+So:
+
+text
+classify_issue
+
+      ↓
+
+route_issue
+
+ ┌────┼─────┐
+ ↓    ↓     ↓
+VPN Password General
+
+
+---
+
+# 18. Connect all tool nodes to final response
+
+python
+builder.add_edge(
+    "password_help",
+    "generate_response"
+)
+
+builder.add_edge(
+    "vpn_help",
+    "generate_response"
+)
+
+builder.add_edge(
+    "general_help",
+    "generate_response"
+)
+
+
+Then:
+
+python
+builder.add_edge(
+    "generate_response",
+    END
+)
+
+
+---
+
+# 19. Compile
+
+python
+helpdesk_graph = builder.compile()
+
+
+---
+
+# 20. Test the project
+
+python
+result = helpdesk_graph.invoke(
+    {
+        "user_query":
+        "My VPN is not connecting",
+
+        "issue_type":
+        "",
+
+        "tool_result":
+        "",
+
+        "final_response":
+        ""
+    }
+)
+
+
+Then:
+
+python
+print(
+    result["final_response"]
+)
+
+
+You should get a professional troubleshooting response.
+
+---
+
+# 21. Inspect the entire state
+
+python
+print(result)
+
+
+You should see something similar to:
+
+text
+{
+    "user_query":
+    "My VPN is not connecting",
+
+    "issue_type":
+    "vpn",
+
+    "tool_result":
+    "VPN Troubleshooting...",
+
+    "final_response":
+    "Please first verify..."
+}
+
+
+This is excellent for teaching because students can see exactly what travelled through the graph.
+
+---
+
+# 22. Draw the graph
+
+python
+from IPython.display import (
+    Image,
+    display
+)
+
+
+Then:
+
+python
+display(
+    Image(
+        helpdesk_graph
+        .get_graph()
+        .draw_mermaid_png()
+    )
+)
+
+
+You should see approximately:
+
+text
+               START
+                 ↓
+          classify_issue
+                 ↓
+          Conditional Route
+         /       |       \
+        ↓        ↓        ↓
+   password     vpn     general
+        \        |        /
+         \       |       /
+            ↓
+      generate_response
+            ↓
+           END
+
+
+---
+
+# 23. Why this is already Agentic
+
+This is more than a normal sequential workflow because:
+
+text
+LLM interprets user request
+        ↓
+System decides route
+        ↓
+Different tool/function is selected
+        ↓
+Result goes back to LLM
+        ↓
+Final answer generated
+
+
+That is the beginning of an agentic pattern.
+
+But technically, this version is still a *controlled LangGraph workflow*, not a completely autonomous agent.
+
+That distinction is useful for students.
+
+---
+
+# 24. Next upgrade — actual tools
+
+After this works, convert:
+
+text
+password_help()
+vpn_help()
+general_it_help()
+
+
+into LangChain tools using:
+
+python
+from langchain.tools import tool
+
+
+For example:
+
+python
+@tool
+def vpn_help() -> str:
+    """
+    Get troubleshooting instructions
+    for VPN connection problems.
+    """
+
+    return """
+    1. Check internet connection.
+    2. Restart VPN.
+    3. Verify credentials.
+    4. Reconnect.
+    """
+
+
+Then we move from:
+
+text
+Graph manually selects functions
+
+
+to:
+
+text
+LLM decides which tool to call
+
+
+That is the next major step.
+
+---
+
+# 25. Then add a real Agent Node
+
+The architecture will evolve into:
+
+text
+                  USER
+                   ↓
+                AGENT
+                   ↓
+              Needs Tool?
+             /          \
+           YES           NO
+            ↓             ↓
+         ToolNode       Answer
+            ↓
+           Agent
+            ↓
+           END
+
+
+This is the classic tool-calling loop.
+
+Current LangGraph documentation explicitly positions custom LangGraph workflows as the option when you want fine-grained control over agents and routing, while simpler agents can be built with higher-level LangChain agent abstractions. [Docs by LangChain](https://docs.langchain.com/oss/python/learn?utm_source=chatgpt.com)
+
+---
+
+# Recommended project progression
+
+For your class, build the same Helpdesk project in four versions:
+
+```text
+VERSION 1
+LangGraph
++
+Conditional Routing
+
+        ↓
+
+VERSION 2
+LLM
++
+Tools
+
+        ↓
+
+VERSION 3
+Agent
++
+Tool Calling Loop
+
+        ↓
+
+VERSION 4
+Human-in-the-Loop
++
+Ticket Creation
++
+Memory

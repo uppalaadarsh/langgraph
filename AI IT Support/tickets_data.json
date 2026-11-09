@@ -1,0 +1,9 @@
+[
+  {
+    "ticket_id": "IT-2618",
+    "summary": "User unable to reset password via company login portal using 'Forgot Password' link; reset process fails.",
+    "priority": "high",
+    "status": "open",
+    "created_at": "2026-11-07 19:15:14"
+  }
+]
